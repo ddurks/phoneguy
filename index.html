@@ -25,12 +25,14 @@
       var CANVAS_WIDTH = 500;
       var CANVAS_HEIGHT = 500;
       var DOCUMENT = document;
-      const STANDARD_FRAME_DELAY = 0.15;
-      const PLATFORM_MIN_WIDTH = 50;
-      const PLATFORM_MAX_WIDTH = 150;
+      const STANDARD_FRAME_DELAY = 0.30;
+      const RENDER_DELAY = 0.03;
+      const PLATFORM_MIN_WIDTH = 100;
+      const PLATFORM_MAX_WIDTH = 400;
       const PLATFORM_HEIGHT = 64;
-      const PLATFORM_SPEED = 200;
+      const PLATFORM_SPEED = 100;
       const PLATFORM_DELAY = 2;
+      const GRAVITY_COEFFICIENT = 5;
 
       // Device Detection //
       var IS_MOBILE;
@@ -85,15 +87,16 @@
           platform.topy = posy;
           platform.rightx = posx+width;
           platform.leftx = posx;
+          platform.collision_possible = false;
           return platform;
         },
 
         updatePosition: function(posx, posy) {
-          this.posx = posx;
-          this.posy = posy;
-          this.topy = posy;
-          this.rightx = posx+this.width;
-          this.leftx = posx;
+          this.posx = Math.floor(posx);
+          this.posy = Math.floor(posy);
+          this.topy = this.posy;
+          this.rightx = this.posx+this.width;
+          this.leftx = this.posx;
         }
       };
 
@@ -103,6 +106,7 @@
         height: 0,
         width: 0,
         scale: 2,
+        imageIsLoaded: false,
 
         // Constructor //
         create: function(posx, posy) {
@@ -111,88 +115,114 @@
           player.spritesheet.onload = function(){
             player.height = player.spritesheet.height;
             player.width = player.spritesheet.width/4;
+            player.scaledWidth = player.width*player.scale;
+            player.scaledHeight = player.height*player.scale;
             player.updatePosition(posx, posy);
+            player.imageIsLoaded = true;
           }.bind(player);
           player.walking_loop = [0,1,0,2,3];
           player.loop = player.walking_loop;
           player.loop_i = 0;
-          player.frame_delay = 0.30;
-          player.jump_speed = 80;
-          player.starting_jump_speed = player.jump_speed;
-          player.gravity = 5;
+          player.frame_delay = STANDARD_FRAME_DELAY;
+          player.jump_speed = 0;
+          player.starting_jump_speed = 35;
           player.is_jumping = false,
+          player.homex = posx;
+          player.homey = posy;
           player.jump_start_timestamp = Utility.getTimestamp();
           player.last_frame_timestamp = Utility.getTimestamp();
+          player.is_on_platform_index = null;
           return player;
+        },
+
+        getBoundaries: function() {
+          return {
+            leftx: this.posx,
+            rightx: this.posx + this.scaledWidth,
+            topy: this.posy,
+            bottomy: this.posy + this.scaledHeight
+          }
         },
 
         // move player to a new position //
         updatePosition: function(posx, posy) {
-          this.posx = posx - ((this.width * this.scale)) + 5;
-          this.posy = posy - ((this.height * this.scale));
-          this.homex = this.posx;
-          this.homey = this.posy;
+          this.posx = Math.floor(posx);
+          this.posy = Math.floor(posy);
         },
 
-        // update sprite based on current animation //
-        updateSprite: function() {
-          if(this.is_jumping) {
-            this.jump();
-          } else {
-            this.run();
-          }
-        },
-
-        // run //
-        run: function() {
-          this.loop = this.walking_loop;
-          this.animationFrame();
+        setHome: function(posx, posy) {
+          this.homex = posx;
+          this.homey = posy;
         },
 
         // start a jump animation //
         startJump: function(){
           if(!this.is_jumping) {
             this.jump_start_timestamp = Utility.getTimestamp();
+            this.jump_speed = this.starting_jump_speed;
             this.is_jumping = true;
+          } else {
+            this.doubleJump();
           }
         },
 
         limitJumpAscent: function() {
-          if(this.is_jumping && this.jump_speed > (0.8*this.starting_jump_speed)) {
-            this.jump_speed = 50;
+          if(this.is_jumping && this.jump_speed > (0.6*this.starting_jump_speed)) {
+            this.jump_speed = 0.6*this.starting_jump_speed;
           }
         },
 
-        // perform a jump //
-        jump: function() {
-          var curr_timestamp = Utility.getTimestamp();
-          var t = curr_timestamp - this.jump_start_timestamp;
+        doubleJump: function() {
+          if(this.is_jumping) {
+            this.jump_speed = this.starting_jump_speed
+          }
+        },
+
+        fall: function() {
+          if(!this.is_jumping) {
+            this.jump_speed = -this.starting_jump_speed;
+            this.is_jumping = true;
+            this.jump_start_timestamp = Utility.getTimestamp()
+          }
+        },
+
+        endJump: function(newposy) {
+          this.is_jumping = false;
+          this.posy = newposy;
+          this.jump_speed = 0;
+        },
+
+        // update a player's position //
+        update: function() {
+          var t = 0;
+          if(this.is_jumping) {
+            t = Utility.getTimestamp() - this.jump_start_timestamp;
+            this.jump_speed = this.jump_speed - GRAVITY_COEFFICIENT * t;
+            if(this.jump_speed < -(0.40*this.starting_jump_speed)) {
+              this.jump_speed = -(0.40*this.starting_jump_speed);
+            }
+          }
           var newy = this.posy - this.jump_speed * t;
-          if (newy > this.homey) {
-            this.posy = this.homey;
-            this.is_jumping = false;
-            this.jump_speed = this.starting_jump_speed;
-            this.loop_i = 0
-          } else {
-            this.posy = newy;
-            this.jump_speed = this.jump_speed + (-20) * t;
-            this.loop_i = 4;
-          }
+          this.updatePosition(this.posx, newy);
+          this.animationFrame();
         },
 
-        // determine next animation frame //
+        // determine next sprite animation frame //
         animationFrame: function() {
           var curr_timestamp = Utility.getTimestamp();
           if (curr_timestamp - this.last_frame_timestamp > this.frame_delay) {
             if(this.frame_delay > 0.15) {
               this.frame_delay = this.frame_delay - 0.02;
             }
-            this.last_frame_timestamp = curr_timestamp;
+            this.last_frame_timestamp = Utility.getTimestamp();
             // -2 because last frame is jump sprite //
             if (this.loop_i < (this.loop.length - 2)) {
               this.loop_i++;
             } else {
               this.loop_i = 0;
+            }
+            if(this.is_jumping) {
+              this.loop_i = 4;
             }
           }
         },
@@ -207,18 +237,8 @@
         curr_timestamp: 0.0,
         prev_timestamp: 0.0,
         last_platform_timestamp: 0.0,
-
-        // KeyState Updater //
-        KeyState: {
-          key: [0,0,0,0],
-          changeKey: function(which, to) {
-            switch (which) {
-              case 32: // SPACE
-                this.key[0] = to;
-                break;
-            }
-          }
-        },
+        last_render_timestamp: 0.0,
+        player_loaded: false,
 
         // Constructor //
         create: function() {
@@ -230,25 +250,45 @@
           view.canvas.height = CANVAS_HEIGHT;
           DOCUMENT.body.appendChild(view.canvas);
           view.context.imageSmoothingEnabled = false;
+          view.player = Player.create(CANVAS_WIDTH,CANVAS_HEIGHT);
           Utility.resize();
-          this.player = Player.create(Math.floor(CANVAS_WIDTH/2),Math.floor(2*CANVAS_HEIGHT/3));
           return view;
         },
 
-        // handle held buttons //
-        handle_user_input: function() {
-          if(this.KeyState.key[0] || this.KeyState.key[1] || this.KeyState.key[2] || this.KeyState.key[3] || this.KeyState.key[4]) {
-            if(this.KeyState.key[0]){
-            
+        // Collision Detection //
+        detectCollisions: function() {
+          //console.log("platform list length: " + this.platforms.length);
+          if (this.player.posy > this.player.homey) {
+              this.player.endJump(this.player.homey);
+          } else {
+            this.platforms.forEach( function(platform, index) {
+              if(platform.collision_possible) {
+                var playerBoundaries = this.player.getBoundaries();
+                // run along platform //
+                if(playerBoundaries.bottomy > platform.posy && playerBoundaries.bottomy < platform.posy + platform.height) {
+                  //console.log("collision detected: ", playerBoundaries.bottomy, platform.posy);
+                  var newy = platform.posy - this.player.height*2;
+                  this.player.is_on_platform_index = index;
+                  this.player.endJump(newy);
+                }
+              }
+              if (this.player.is_on_platform_index == index && !platform.collision_possible) {
+                //console.log("collision with platform index " + index + " no longer possible");
+                this.player.is_on_platform_index = null;
+              }
+            }.bind(this));
+            // fall from platform //
+            if(this.player.is_on_platform_index == null && !this.player.is_jumping && this.player.posy < this.player.homey) {
+              this.player.fall();
             }
           }
         },
 
         // Drawing/Rendering on Canvas //
         render: function() {
-          this.player.updateSprite();
+          this.context.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+          this.drawPlatforms();
           this.draw_player();
-          this.updatePlatforms();
         },
         draw_text: function(message, x, y) {
           this.context.font = "25px Arial";
@@ -261,53 +301,87 @@
         draw_player: function() {
           this.draw_player_frame(this.player, this.player.loop[this.player.loop_i], 0, this.player.posx, this.player.posy);
         },
-
         drawPlatform: function(platform) {
           this.context.fillRect(platform.posx, platform.posy, platform.width, platform.height);
         },
-
-        newPlatform: function() {
-          var position = this.newPlatformPosition();
-          var randomWidth = Utility.getRandomInt(PLATFORM_MIN_WIDTH, PLATFORM_MAX_WIDTH);
-          console.log(position.x, position.y);
-          var newPlatform = Platform.create(position.x, position.y, randomWidth, PLATFORM_HEIGHT);
-          this.platforms.push(newPlatform);
+        drawPlatforms: function() {
+          var collision_platform = null;
+          this.platforms.forEach(function(platform, index, object) {
+            this.drawPlatform(platform);
+          }.bind(this));
         },
 
-        newPlatformPosition: function() {
-          return {
-            x: CANVAS_HEIGHT,
-            y: Utility.getRandomInt(200, this.player.homey + (this.player.height*this.player.scale))
-          };
+        // Updating Game State //
+        update: function() {
+          this.player.update();
+          this.updatePlatforms();
         },
-
         updatePlatforms: function() {
-          var deltat = this.curr_timestamp - this.prev_timestamp;
-        
+          var render_deltat = Utility.getTimestamp() - this.last_render_timestamp;
           // Generate new platform every 5 seconds //
           if((this.curr_timestamp - this.last_platform_timestamp) >= PLATFORM_DELAY) {
             this.newPlatform();
             this.last_platform_timestamp = Utility.getTimestamp();
           }
+          var delete_index = null;
           // Update platforms, remove platforms out of scope //
           this.platforms.forEach(function(platform, index, object) {
             if (platform.rightx < 0) {
-              object.splice(index, 1);
+              delete_index = index;
             } else {
-              platform.updatePosition(platform.posx - PLATFORM_SPEED*deltat, platform.posy);
+              platform.updatePosition(platform.posx - PLATFORM_SPEED*render_deltat, platform.posy);
               this.drawPlatform(platform);
+              // update active platform for collision detection //
+              var playerBoundaries = this.player.getBoundaries();
+              if(playerBoundaries.rightx >= platform.leftx && playerBoundaries.leftx <= platform.rightx) {
+                platform.collision_possible = true;
+              } else {
+                platform.collision_possible = false;
+              }
             }
           }.bind(this));
+          // remove platform outside of loop to avoid flicker //
+          if (delete_index != null) {
+            this.platforms.splice(delete_index, 1);
+            this.player.is_on_platform_index -= 1;
+          }
+        },
+        newPlatform: function() {
+          var position = this.newPlatformPosition();
+          var randomWidth = Utility.getRandomInt(PLATFORM_MIN_WIDTH, PLATFORM_MAX_WIDTH);
+          var newPlatform = Platform.create(position.x, position.y, randomWidth, PLATFORM_HEIGHT);
+          this.platforms.push(newPlatform);
+        },
+        newPlatformPosition: function() {
+          return {
+            x: CANVAS_WIDTH,
+            y: Utility.getRandomInt(100, this.player.homey + this.player.height)
+          };
         },
 
         // Step the Game one Frame //
         step: function(timestamp) {
           this.prev_timestamp = this.curr_timestamp;
           this.curr_timestamp = Utility.getTimestamp();
-          Utility.resize();
-          this.context.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-          //this.handle_user_input();
-          this.render();
+
+          if(this.player_loaded) {
+            this.detectCollisions();
+
+            this.update();
+
+            var render_deltat = Utility.getTimestamp() - this.last_render_timestamp;
+            if(render_deltat > RENDER_DELAY) {
+              this.render();
+              this.last_render_timestamp = Utility.getTimestamp();
+            }
+          } else {
+            if(this.player.imageIsLoaded) {
+              this.player.updatePosition(200,300);
+              this.player.setHome(200, 300);
+              this.player_loaded = true;
+            }
+          }
+          
           window.requestAnimationFrame(function(timestamp) {
             this.step(timestamp);
           }.bind(this));
@@ -316,28 +390,27 @@
         // Start Game Loop //
         init_game_loop: function() {
           var timestamp = Utility.getTimestamp();
+          this.last_render_timestamp = timestamp;
           // Mobile Controls //
           if(IS_MOBILE) {
             window.addEventListener("touchstart", function(e) {
               this.player.startJump();
             }.bind(this));
-            window.addEventListener("touchend", function(e) {
-              this.player.limitJumpAscent();
-            }.bind(this));
+            // window.addEventListener("touchend", function(e) {
+            //   //this.player.limitJumpAscent();
+            // }.bind(this));
           // Desktop Controls //
           } else {
             window.addEventListener('keydown', function(e) {
               if(e.keyCode == 32) {
                 this.player.startJump();
               }
-              this.KeyState.changeKey(e.keyCode, 1);
             }.bind(this));
-            window.addEventListener('keyup', function(e) { 
-              if(e.keyCode == 32) {
-                this.player.limitJumpAscent();
-              }
-              this.KeyState.changeKey(e.keyCode, 0);
-            }.bind(this));
+            // window.addEventListener('keyup', function(e) { 
+            //   if(e.keyCode == 32) {
+            //     //this.player.limitJumpAscent();
+            //   }
+            // }.bind(this));
           }
           window.requestAnimationFrame(function(timestamp) {
             this.step(timestamp);
